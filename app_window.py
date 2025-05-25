@@ -1,5 +1,6 @@
 import os
 import shutil
+import gc, time
 import win32com.client # Necessário para psApp = win32com.client.Dispatch(...) em gerar_cartoes
 
 # Imports de bibliotecas de terceiros (instaladas com pip)
@@ -525,77 +526,95 @@ class CartaoApp(QMainWindow):
 
     def modificar_modelo(self):
         modelo_selecionado = self.modelo_combobox.currentText()
-        if not modelo_selecionado or modelo_selecionado == TEXTO_NENHUM_MODELO:  # Usando constante!
+        if not modelo_selecionado or modelo_selecionado == TEXTO_NENHUM_MODELO:
             QMessageBox.information(self, "Modificar Modelo", "Nenhum modelo selecionado para modificar.")
             return
 
-        # PASSO 1: Buscar a configuração de camadas ATUAL para o modelo selecionado
-        # self.configuracoes_modelos é o dicionário carregado no __init__
-        # Usamos .get() para retornar uma lista vazia se o modelo ainda não tiver configuração
         camadas_atuais_para_edicao = self.configuracoes_modelos.get(modelo_selecionado, [])
         self.log_message(f"Modificando modelo '{modelo_selecionado}'. Camadas atuais: {camadas_atuais_para_edicao}")
 
-        # PASSO 2: Abrir o diálogo para o usuário selecionar o arquivo PSD (pode ser o mesmo ou um novo)
+        # Abrir o diálogo para o usuário selecionar o arquivo PSD
         novo_arquivo_psd_path, _ = QFileDialog.getOpenFileName(
             self,
             f"Selecionar NOVO arquivo para o modelo '{modelo_selecionado}' (ou o mesmo para apenas editar camadas)",
-            PASTA_PADRAO_MODELOS,  # Usando constante!
+            PASTA_PADRAO_MODELOS,
             "Arquivos do Photoshop (*.psd);;Todos os Arquivos (*.*)"
         )
 
-        if novo_arquivo_psd_path:  # Se o usuário selecionou um arquivo
-            # O nome do modelo no sistema (chave de configuração) NÃO MUDA.
-            # O que muda é o CONTEÚDO do arquivo PSD e, potencialmente, sua configuração de camadas.
+        if not novo_arquivo_psd_path:  # Se o usuário cancelou a seleção do arquivo
+            return
 
-            # PASSO 3: Abrir o diálogo de configuração de camadas, PRÉ-PREENCHIDO
-            dialogo_config = ConfigCamadasDialog(modelo_selecionado,  # Passa o NOME do modelo original
-                                                 camadas_existentes=camadas_atuais_para_edicao,
-                                                 # Passa as camadas atuais
-                                                 parent=self)
+        # Configurar o diálogo de camadas
+        dialogo_config = ConfigCamadasDialog(
+            modelo_selecionado,
+            camadas_existentes=camadas_atuais_para_edicao,
+            parent=self
+        )
 
-            dialogo_config.configuracaoSalva.connect(
-                lambda lista_camadas: self._processar_camadas_configuradas(modelo_selecionado, lista_camadas)
-                # Usamos 'modelo_selecionado' como chave para salvar, pois é este que está sendo modificado
-            )
+        dialogo_config.configuracaoSalva.connect(
+            lambda lista_camadas: self._processar_camadas_configuradas(modelo_selecionado, lista_camadas)
+        )
 
-            configuracao_foi_salva_pelo_dialogo = False
-            if dialogo_config.exec():
-                # Usuário clicou em "Salvar" no diálogo.
-                # O _processar_camadas_configuradas já foi chamado e salvou no JSON.
-                self.log_message(f"Configuração de camadas para '{modelo_selecionado}' foi atualizada.")
-                configuracao_foi_salva_pelo_dialogo = True
-            else:
-                # Usuário clicou em "Cancelar" no diálogo.
-                # Nenhuma alteração na configuração das camadas será salva.
-                # O modelo continua com sua configuração anterior (camadas_atuais_para_edicao).
-                self.log_message(
-                    f"Modificação da configuração de camadas para '{modelo_selecionado}' cancelada pelo usuário.")
-                # Se ele cancelou e não havia camadas antes, e ele não adicionou, a lista continua vazia.
-                # E se ele tinha camadas, elas não foram alteradas.
-                # Se for um modelo novo sendo "modificado" (caso estranho, mas possível se o adicionar falhou no config)
-                # e ele cancelar, _processar_camadas_configuradas não é chamado com lista vazia aqui,
-                # diferente do adicionar_modelo, pois aqui estamos partindo de uma config existente (ou lista vazia se não existia).
+        # Executar o diálogo de configuração
+        if dialogo_config.exec():
+            self.log_message(f"Configuração de camadas para '{modelo_selecionado}' foi atualizada.")
+        else:
+            self.log_message(
+                f"Modificação da configuração de camadas para '{modelo_selecionado}' cancelada pelo usuário.")
+            return  # Se cancelou, não precisa copiar o arquivo
 
-            # PASSO 4: Copiar o conteúdo do NOVO arquivo PSD para o arquivo do modelo existente
-            caminho_destino_modelo = os.path.join(PASTA_PADRAO_MODELOS, modelo_selecionado)
+        # Fechar aplicações do Photoshop antes de copiar o arquivo
+        try:
+            if hasattr(self, "doc") and self.doc is not None:
+                self.doc.Close(2)
+                self.doc = None
+            if hasattr(self, "psApp") and self.psApp is not None:
+                self.psApp.Quit()
+                self.psApp = None
+        except Exception:
+            pass
+
+        gc.collect()
+        time.sleep(1)  # Aguardar o SO liberar o lock
+
+        # Definir o caminho de destino ANTES de tentar copiar
+        caminho_destino_modelo = os.path.join(PASTA_PADRAO_MODELOS, modelo_selecionado)
+
+        # Tentar copiar o arquivo com múltiplas tentativas
+        tentativas = 5
+        sucesso_copia = False
+
+        for i in range(tentativas):
             try:
                 shutil.copy2(novo_arquivo_psd_path, caminho_destino_modelo)
-                self.log_message(f"Conteúdo do arquivo PSD para o modelo '{modelo_selecionado}' foi atualizado.")
+                sucesso_copia = True
+                break
+            except PermissionError as e:
+                self.log_message(f"Tentativa {i + 1}/{tentativas}: {e}")
+                time.sleep(1)
 
-                # Força a regeneração do preview, pois o arquivo PSD pode ter mudado
-                preview_path = os.path.join(PASTA_PADRAO_MODELOS,
-                                            f"{os.path.splitext(modelo_selecionado)[0]}_preview.png")
-                if os.path.exists(preview_path):
-                    os.remove(preview_path)
+        if not sucesso_copia:
+            QMessageBox.critical(self, "Erro ao modificar",
+                                 f"Não foi possível substituir o arquivo após {tentativas} tentativas.")
+            self.log_message(f"Erro ao modificar '{modelo_selecionado}': falha na cópia do arquivo")
+            return
 
-                self.atualizar_modelos_combobox()  # Para garantir que o modelo certo esteja selecionado
-                self.modelo_combobox.setCurrentText(
-                    modelo_selecionado)  # Re-seleciona, o que deve chamar atualizar_preview_modelo
-                # self.atualizar_preview_modelo(modelo_selecionado) # Ou chama diretamente
+        # Se chegou aqui, a cópia foi bem-sucedida
+        self.log_message(f"Conteúdo do arquivo PSD para o modelo '{modelo_selecionado}' foi atualizado.")
 
-            except Exception as e:
-                QMessageBox.critical(self, "Erro ao modificar", f"Não foi possível substituir o arquivo: {e}")
-                self.log_message(f"Erro ao modificar '{modelo_selecionado}': {e}")
+        # Forçar regeneração do preview
+        try:
+            preview_path = os.path.join(PASTA_PADRAO_MODELOS,
+                                        f"{os.path.splitext(modelo_selecionado)[0]}_preview.png")
+            if os.path.exists(preview_path):
+                os.remove(preview_path)
+
+            self.atualizar_modelos_combobox()
+            self.modelo_combobox.setCurrentText(modelo_selecionado)
+
+        except Exception as e:
+            self.log_message(f"Aviso: Erro ao atualizar preview para '{modelo_selecionado}': {e}")
+            # Não é um erro crítico, apenas um aviso
 
     def excluir_modelo(self):
         modelo_selecionado = self.modelo_combobox.currentText()
