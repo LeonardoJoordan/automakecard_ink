@@ -25,6 +25,8 @@ import utils
 import ps_utils
 from custom_widgets import CustomTableWidget
 from dialogo_config_camadas import ConfigCamadasDialog
+from caixa_para_modificar_modelo import CaixaModificarModeloDialog
+
 
 # ________________________________________________________________________________________________
 
@@ -852,75 +854,33 @@ class CartaoApp(QMainWindow):
 
     def modificar_modelo(self):
         """
-        Inicia o fluxo para modificar um modelo existente.
-        Apresenta ao utilizador a escolha entre:
-        A) Apenas reconfigurar as camadas do modelo PSD existente.
-        B) Substituir o ficheiro PSD do modelo por um novo E depois reconfigurar as camadas.
+        Inicia o fluxo para modificar um modelo existente usando um diálogo personalizado.
         """
         modelo_selecionado = self.modelo_combobox.currentText()
 
         if not modelo_selecionado or modelo_selecionado == utils.TEXTO_NENHUM_MODELO:
-            QMessageBox.information(self, "Modificar Modelo",
-                                    "Nenhum modelo selecionado para modificar.")
+            QMessageBox.information(self, "Modificar Modelo", "Nenhum modelo selecionado para modificar.")
             return
 
-        self.log_message(f"A iniciar modificação para o modelo: '{modelo_selecionado}'.")
+        self.log_message(f"A abrir diálogo de decisão de modificação para: '{modelo_selecionado}'.")
 
-        # Cria a caixa de diálogo de decisão com as opções
-        dialogo_decisao = QMessageBox(self)
-        dialogo_decisao.setWindowTitle("Modificar Modelo")
-        dialogo_decisao.setText(f"O que deseja fazer com o modelo '{modelo_selecionado}'?")
-        dialogo_decisao.setInformativeText(
-            "Escolha uma das opções abaixo:"
-        )
-        dialogo_decisao.setIcon(QMessageBox.Icon.Question)
+        # Cria e executa o nosso novo diálogo personalizado
+        dialogo = CaixaModificarModeloDialog(modelo_selecionado, self)
 
-        # Define os botões com textos personalizados e papéis
-        # Opção A
-        btn_alterar_config_camadas = dialogo_decisao.addButton(
-            "Apenas alterar a configuração das camadas",
-            QMessageBox.ButtonRole.ActionRole
-        )
-        # Opção B
-        btn_substituir_psd_e_configurar = dialogo_decisao.addButton(
-            "Substituir o ficheiro PSD e reconfigurar camadas",
-            QMessageBox.ButtonRole.ActionRole
-        )
-        # Botão Cancelar
-        btn_cancelar = dialogo_decisao.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
-
-        dialogo_decisao.setDefaultButton(btn_cancelar)  # Define Cancelar como padrão
-        dialogo_decisao.exec()  # Mostra o diálogo e espera pela interação do utilizador
-
-        # Verifica qual botão foi clicado
-        botao_clicado = dialogo_decisao.clickedButton()
-
-        if botao_clicado == btn_alterar_config_camadas:
-            self.log_message(f"Opção escolhida: Apenas alterar configuração de camadas para '{modelo_selecionado}'.")
-            # Chama o método auxiliar para a Opção A (ainda a ser implementado)
-            if hasattr(self, '_handle_alterar_apenas_camadas'):
+        # O diálogo só continua se o utilizador clicar num dos botões de ação (não no 'Cancelar')
+        if dialogo.exec():
+            # Verifica a escolha guardada no diálogo
+            if dialogo.escolha == 'camadas':
+                self.log_message(
+                    f"Opção escolhida: Apenas alterar configuração de camadas para '{modelo_selecionado}'.")
                 self._handle_alterar_apenas_camadas(modelo_selecionado)
-            else:
-                self.log_message("AVISO: Método '_handle_alterar_apenas_camadas' ainda não implementado.")
-                QMessageBox.information(self, "Em Desenvolvimento",
-                                        "Funcionalidade para alterar apenas camadas ainda não implementada.")
-
-        elif botao_clicado == btn_substituir_psd_e_configurar:
-            self.log_message(f"Opção escolhida: Substituir ficheiro PSD e reconfigurar para '{modelo_selecionado}'.")
-            # Chama o método auxiliar para a Opção B (ainda a ser implementado)
-            if hasattr(self, '_handle_substituir_psd_e_reconfigurar'):
+            elif dialogo.escolha == 'arquivo':
+                self.log_message(
+                    f"Opção escolhida: Substituir ficheiro PSD e reconfigurar para '{modelo_selecionado}'.")
                 self._handle_substituir_psd_e_reconfigurar(modelo_selecionado)
-            else:
-                self.log_message("AVISO: Método '_handle_substituir_psd_e_reconfigurar' ainda não implementado.")
-                QMessageBox.information(self, "Em Desenvolvimento",
-                                        "Funcionalidade para substituir PSD e reconfigurar ainda não implementada.")
-
-        elif botao_clicado == btn_cancelar:
-            self.log_message("Modificação de modelo cancelada pelo utilizador na caixa de decisão.")
         else:
-            # Caso o diálogo seja fechado de outra forma (ex: 'X' da janela)
-            self.log_message("Diálogo de modificação de modelo fechado sem seleção de opção.")
-
+            # O utilizador clicou em 'Cancelar' ou fechou a janela
+            self.log_message("Modificação de modelo cancelada pelo utilizador.")
 # ________________________________________________________________________________________________
 
     # Este método deve estar dentro da classe CartaoApp
