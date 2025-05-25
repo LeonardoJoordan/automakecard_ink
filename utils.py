@@ -6,6 +6,11 @@ from PySide6.QtCore import Qt
 
 APP_NAME = "AutoMakeCardPSD" # Nome para a pasta de configuração
 CONFIG_CAMADAS_FILENAME = "config_camadas_modelos.json"
+TEXTO_NENHUM_MODELO = "(nenhum modelo disponível)"
+CAMADA_TRATAMENTO = "tratamento"
+CAMADA_NOME = "nome"
+CAMADA_CONJUGE = "conjuge"
+CAMADA_DATA = "data"
 
 def get_app_config_dir():
     """Retorna o caminho para a pasta de configuração da aplicação."""
