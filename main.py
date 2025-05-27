@@ -3,6 +3,8 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QTranslator, QLocale, QLibraryInfo
 from app_window import CartaoApp  # A classe da nossa janela principal.
 from utils import set_dark_theme  # A função para o tema escuro.
+from dialogo_gerenciar_regras import GerenciarRegrasDialog
+from dialogo_regras_texto import GerenciarRegrasTextoDialog
 
 # Ponto de partida oficial do programa
 if __name__ == "__main__":

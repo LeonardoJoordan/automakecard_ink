@@ -3,7 +3,9 @@ import os
 import shutil
 import time
 import gc # Garbage Collector, para _forcar_fechamento_photoshop
-
+import re
+from dialogo_regras_texto import GerenciarRegrasTextoDialog
+from collections import defaultdict
 # Imports de bibliotecas de terceiros (instaladas com pip)
 from PIL import Image # Para manipulação de imagens no preview
 import psutil # Para _forcar_fechamento_photoshop
@@ -24,9 +26,9 @@ from PySide6.QtCore import Qt, QSize, QEvent
 import utils
 import ps_utils
 from custom_widgets import CustomTableWidget
-from dialogo_config_camadas import ConfigCamadasDialog
-from caixa_para_modificar_modelo import CaixaModificarModeloDialog
 
+from caixa_para_modificar_modelo import CaixaModificarModeloDialog
+from dialogo_gerenciar_regras import GerenciarRegrasDialog
 
 # ________________________________________________________________________________________________
 
@@ -85,18 +87,12 @@ class CartaoApp(QMainWindow):
         esquerda_layout.addWidget(self.data_table)
 
         # Botões de gerenciamento da tabela
-        botoes_tabela_layout = QHBoxLayout()
-        btn_add_row = QPushButton("Adicionar Linha")
-        btn_add_row.clicked.connect(self.add_table_row) # Conexão será feita quando o método existir
-        btn_remove_row = QPushButton("Remover Linha(s)")
-        btn_remove_row.clicked.connect(self.remove_selected_table_rows)
-        btn_clear_table = QPushButton("Limpar Tabela")
-        btn_clear_table.clicked.connect(self.clear_table)
-
-        botoes_tabela_layout.addWidget(btn_add_row)
-        botoes_tabela_layout.addWidget(btn_remove_row)
-        botoes_tabela_layout.addWidget(btn_clear_table)
-        esquerda_layout.addLayout(botoes_tabela_layout)
+        # Botão para gerenciar as regras de texto
+        self.btn_gerenciar_regras = QPushButton("Gerenciar Regras de Texto")
+        # A conexão com a função que abre o diálogo será feita em um passo futuro
+        self.btn_gerenciar_regras.clicked.connect(self.abrir_dialogo_gerenciar_regras)
+        self.btn_gerenciar_regras.setEnabled(False)  # Começa desabilitado
+        esquerda_layout.addWidget(self.btn_gerenciar_regras)
 
         main_layout.addWidget(esquerda_container, 2)  # Coluna da esquerda ocupa 2/3 da largura
 
@@ -175,11 +171,6 @@ class CartaoApp(QMainWindow):
         self.atualizar_modelos_combobox() # Será chamado quando o método existir
         self.log_message(f"Configurações de {len(self.configuracoes_modelos)} modelos carregadas.")
         self.log_message(f"Pasta de saída padrão: {self.output_dir}")
-
-        # Conexões dos botões da tabela (adiadas para quando os métodos existirem)
-        btn_add_row.clicked.connect(self.add_table_row)
-        btn_remove_row.clicked.connect(self.remove_selected_table_rows)
-        btn_clear_table.clicked.connect(self.clear_table)
 
 #________________________________________________________________________________________________
 
@@ -349,68 +340,66 @@ class CartaoApp(QMainWindow):
 
     def _atualizar_tabela_para_modelo(self, nome_modelo_psd: str):
         """
-        Atualiza as colunas, cabeçalhos e estado da tabela de dados
-        com base nas camadas configuradas para o modelo PSD selecionado.
-        Também habilita/desabilita o botão 'Gerar Cartões'.
-
-        Args:
-            nome_modelo_psd: O nome do arquivo do modelo PSD selecionado.
+        Atualiza as colunas da tabela com base nos 'Dados Específicos' configurados
+        para o modelo PSD selecionado. Também gerencia o estado dos botões.
         """
-        self.data_table.setRowCount(0)  # Limpa quaisquer linhas existentes antes de reconfigurar
+        self.data_table.setRowCount(0)
 
+        # Desabilita os botões por padrão se nenhum modelo válido for selecionado
         if not nome_modelo_psd or nome_modelo_psd == utils.TEXTO_NENHUM_MODELO:
             self.table_headers = []
             self.data_table.setColumnCount(0)
-            # Pode-se adicionar uma mensagem na tabela ou deixá-la vazia
-            self.data_table.setHorizontalHeaderLabels(self.table_headers)  # Limpa cabeçalhos
-            if hasattr(self, 'btn_gerar_cartoes'):
-                self.btn_gerar_cartoes.setEnabled(False)
-            self.log_message("Nenhum modelo selecionado. Tabela e botão 'Gerar Cartões' desabilitados.")
-            self.data_table.setRowCount(15)  # Restaura um número padrão de linhas vazias
+            self.data_table.setHorizontalHeaderLabels([])
+            self.btn_gerar_cartoes.setEnabled(False)
+            self.btn_gerenciar_regras.setEnabled(False)
+            self.log_message("Nenhum modelo selecionado. Tabela e botões de ação desabilitados.")
+            self.data_table.setRowCount(15)
             return
 
-        # Busca as camadas configuradas para este modelo
-        # self.configuracoes_modelos é carregado no __init__ e atualizado por _processar_camadas_configuradas
-        camadas_configuradas = self.configuracoes_modelos.get(nome_modelo_psd, [])
+        # Busca a configuração completa do modelo (que agora é um dicionário)
+        config_modelo = self.configuracoes_modelos.get(nome_modelo_psd, {})
+        # Pega a lista de 'Dados Específicos' de dentro da configuração
+        dados_especificos_configurados = config_modelo.get("dados_especificos", [])
 
-        if not camadas_configuradas:
+        if not dados_especificos_configurados:
             self.table_headers = []
-            self.data_table.setColumnCount(1)  # Uma coluna para a mensagem
-            self.data_table.setHorizontalHeaderLabels(["Status"])  # Cabeçalho genérico
+            self.data_table.setColumnCount(1)
+            self.data_table.setHorizontalHeaderLabels(["Status"])
+            self.data_table.setRowCount(1)
 
-            self.data_table.setRowCount(1)  # Uma linha para a mensagem
             mensagem_item = QTableWidgetItem(
-                "Modelo não configurado. Use 'Modificar Modelo' para definir as camadas editáveis."
+                "Modelo não configurado. Use 'Modificar Modelo' para definir os Dados Específicos."
             )
             mensagem_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            mensagem_item.setFlags(mensagem_item.flags() ^ Qt.ItemFlag.ItemIsEditable)  # Não editável
+            mensagem_item.setFlags(mensagem_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
             self.data_table.setItem(0, 0, mensagem_item)
 
-            # Ajusta a coluna da mensagem para ocupar todo o espaço
             self.data_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-            self.data_table.verticalHeader().setVisible(False)  # Esconde cabeçalho vertical
+            self.data_table.verticalHeader().setVisible(False)
 
-            if hasattr(self, 'btn_gerar_cartoes'):
-                self.btn_gerar_cartoes.setEnabled(False)
-            self.log_message(
-                f"Modelo '{nome_modelo_psd}' não possui camadas configuradas. Botão 'Gerar Cartões' desabilitado.")
+            self.btn_gerar_cartoes.setEnabled(False)
+            # O botão de gerenciar regras deve ficar habilitado, pois o usuário pode querer
+            # criar regras mesmo sem dados específicos (embora incomum).
+            # Ou podemos desabilitar também para forçar a configuração primeiro. Vamos desabilitar.
+            self.btn_gerenciar_regras.setEnabled(False)
+            self.log_message(f"Modelo '{nome_modelo_psd}' não possui Dados Específicos configurados.")
         else:
-            self.table_headers = camadas_configuradas  # Atualiza os cabeçalhos da instância
-            num_colunas = len(self.table_headers)
-            self.data_table.setColumnCount(num_colunas)
+            self.table_headers = dados_especificos_configurados
+            self.data_table.setColumnCount(len(self.table_headers))
             self.data_table.setHorizontalHeaderLabels(self.table_headers)
 
-            # Restaura a visibilidade e comportamento padrão dos cabeçalhos
             self.data_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
             self.data_table.verticalHeader().setVisible(True)
-            self.data_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)  # Ou como desejar
+            self.data_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
 
-            self.data_table.setRowCount(15)  # Define um número padrão de linhas vazias
+            self.data_table.setRowCount(15)
 
-            if hasattr(self, 'btn_gerar_cartoes'):
-                self.btn_gerar_cartoes.setEnabled(True)
+            # Habilita os botões de ação, pois temos um modelo válido e configurado
+            self.btn_gerar_cartoes.setEnabled(True)
+            self.btn_gerenciar_regras.setEnabled(True)
             self.log_message(
-                f"Tabela atualizada para o modelo '{nome_modelo_psd}' com as colunas: {self.table_headers}. Botão 'Gerar Cartões' habilitado.")
+                f"Tabela atualizada para o modelo '{nome_modelo_psd}' com os Dados Específicos: {self.table_headers}."
+            )
 
 # ________________________________________________________________________________________________
 
@@ -554,60 +543,49 @@ class CartaoApp(QMainWindow):
 # ________________________________________________________________________________________________
 
     # Este método deve estar dentro da classe CartaoApp
-
-    def _processar_camadas_configuradas(self, nome_arquivo_psd: str, lista_camadas_configuradas: list[str]):
+    def _processar_dados_especificos_configurados(self, nome_arquivo_psd: str, lista_dados_configurados: list[str]):
         """
-        Recebe a lista de camadas configuradas para um arquivo PSD,
-        atualiza o dicionário self.configuracoes_modelos e salva
-        o dicionário inteiro no arquivo JSON de configurações.
-
-        Args:
-            nome_arquivo_psd: O nome do arquivo PSD para o qual as camadas foram configuradas.
-            lista_camadas_configuradas: Uma lista de strings com os nomes das camadas.
-                                         Pode ser uma lista vazia se o usuário não configurou
-                                         ou cancelou a configuração.
+        Recebe a lista de 'Dados Específicos' configurados para um modelo,
+        atualiza a configuração do modelo e salva o arquivo JSON.
+        Preserva as 'Regras de Texto' existentes.
         """
-        self.log_message(f"A processar configuração de camadas para '{nome_arquivo_psd}'. Camadas recebidas: {lista_camadas_configuradas}")
+        self.log_message(f"Processando 'Dados Específicos' para '{nome_arquivo_psd}': {lista_dados_configurados}")
 
         if not nome_arquivo_psd:
-            self.log_message("ERRO: Tentativa de processar camadas para um nome de arquivo PSD vazio. Operação abortada.")
+            self.log_message("ERRO: Tentativa de processar 'Dados Específicos' para um nome de arquivo PSD vazio.")
             return
 
-        # Se a lista de camadas estiver vazia, significa que o usuário
-        # não configurou camadas ou limpou uma configuração existente.
-        # Nesse caso, removemos a entrada do modelo do dicionário, se existir.
-        if not lista_camadas_configuradas:
-            if nome_arquivo_psd in self.configuracoes_modelos:
-                del self.configuracoes_modelos[nome_arquivo_psd]
-                self.log_message(f"Configuração de camadas removida para '{nome_arquivo_psd}' pois nenhuma camada foi definida/salva.")
-            else:
-                # Modelo novo que não foi configurado, não precisa fazer nada no dicionário ainda,
-                # pois ele não estaria lá. A ausência no dicionário já indica "não configurado".
-                self.log_message(f"Nenhuma camada configurada para o novo modelo '{nome_arquivo_psd}'. Ele permanecerá não configurado.")
-        else:
-            # Se há camadas, atualizamos ou adicionamos a entrada no dicionário.
-            self.configuracoes_modelos[nome_arquivo_psd] = lista_camadas_configuradas
-            self.log_message(f"Configuração de camadas para '{nome_arquivo_psd}' atualizada para: {lista_camadas_configuradas}")
+        # Pega a configuração atual do modelo. Se não existir, começa com um dicionário vazio.
+        config_atual = self.configuracoes_modelos.get(nome_arquivo_psd, {})
 
-        # Salva o dicionário inteiro de configurações no arquivo JSON
-        # A função salvar_configuracoes_camadas_modelos deve retornar True em sucesso, False em falha.
+        if not lista_dados_configurados:
+            # Se o usuário não definiu nenhum dado, limpamos apenas os dados específicos,
+            # mas mantemos as regras, caso ele queira reconfigurar depois.
+            config_atual["dados_especificos"] = []
+            self.log_message(f"'Dados Específicos' limpos para '{nome_arquivo_psd}'.")
+        else:
+            # Atualiza apenas a chave 'dados_especificos' na configuração do modelo
+            config_atual["dados_especificos"] = lista_dados_configurados
+            self.log_message(f"'Dados Específicos' para '{nome_arquivo_psd}' atualizados.")
+
+        # Garante que a chave 'regras_texto' exista, caso seja um modelo novo.
+        if "regras_texto" not in config_atual:
+            config_atual["regras_texto"] = {}
+
+        # Coloca a configuração atualizada (ou nova) de volta no dicionário principal
+        self.configuracoes_modelos[nome_arquivo_psd] = config_atual
+
+        # Salva o dicionário de configurações inteiro no arquivo JSON
         if utils.salvar_configuracoes_camadas_modelos(self.configuracoes_modelos):
-            self.log_message("Arquivo de configuração de camadas de modelos salvo com sucesso.")
+            self.log_message("Arquivo de configuração de modelos salvo com sucesso.")
         else:
-            self.log_message("ERRO CRÍTICO ao salvar o arquivo de configuração de camadas de modelos.")
+            self.log_message("ERRO CRÍTICO ao salvar o arquivo de configuração de modelos.")
             QMessageBox.critical(self, "Erro de Salvamento",
-                                 "Não foi possível salvar as configurações de camadas no arquivo JSON.\n"
-                                 "Verifique o console de log para mais detalhes e as permissões do arquivo/pasta.")
+                                 "Não foi possível salvar as configurações no arquivo JSON.")
 
-        # Após salvar, é importante que a interface reflita essa mudança.
-        # Se o modelo atualmente selecionado no ComboBox for o que acabamos de configurar,
-        # precisamos atualizar a tabela. _quando_modelo_mudar faz isso.
+        # Atualiza a UI se o modelo modificado for o que está selecionado
         if self.modelo_combobox.currentText() == nome_arquivo_psd:
-            if hasattr(self, '_quando_modelo_mudar'):
-                self._quando_modelo_mudar(nome_arquivo_psd)
-            else:
-                # Isso não deveria acontecer se a ordem de implementação estiver correta
-                self.log_message("Aviso: _quando_modelo_mudar não encontrado para atualizar a UI após processar camadas.")
+            self._quando_modelo_mudar(nome_arquivo_psd)
 
 # ________________________________________________________________________________________________
 
@@ -617,7 +595,7 @@ class CartaoApp(QMainWindow):
         """
         Abre um diálogo para o usuário selecionar um novo arquivo PSD.
         Copia o arquivo para a pasta de modelos e, em seguida, abre o
-        ConfigCamadasDialog para que o usuário defina as camadas editáveis.
+        GerenciarRegrasDialog para que o usuário defina as camadas editáveis.
         """
         self.garantir_pasta_modelos()  # Garante que a pasta de modelos exista
 
@@ -662,7 +640,7 @@ class CartaoApp(QMainWindow):
         # Se a cópia foi bem-sucedida, abre o diálogo de configuração de camadas.
         # Para um novo modelo, não há camadas existentes para pré-preencher, então passamos uma lista vazia.
         self.log_message(f"A abrir diálogo de configuração de camadas para o novo modelo: '{nome_base_arquivo}'.")
-        dialogo_config = ConfigCamadasDialog(
+        dialogo_config = GerenciarRegrasDialog(
             psd_filename=nome_base_arquivo,
             camadas_existentes=[],  # Novo modelo, sem camadas pré-definidas
             parent=self
@@ -671,8 +649,7 @@ class CartaoApp(QMainWindow):
         # Conecta o sinal do diálogo ao nosso método que processa e salva as camadas
         # Usamos uma lambda para passar o nome_base_arquivo corretamente.
         # A conexão é feita aqui, e não globalmente, pois é específica para esta instância do diálogo.
-        dialogo_config.configuracaoSalva.connect(
-            lambda lista_camadas_salvas: self._processar_camadas_configuradas(nome_base_arquivo, lista_camadas_salvas)
+        dialogo_config.configuracaoSalva.connect(lambda lista_dados_salvos: self._processar_dados_especificos_configurados(nome_base_arquivo, lista_dados_salvos)
         )
 
         # Executa o diálogo de configuração. O diálogo é modal.
@@ -902,15 +879,14 @@ class CartaoApp(QMainWindow):
         self.log_message(f"Camadas atuais para '{nome_modelo_selecionado}' (antes da edição): {camadas_atuais}")
 
         # Cria e configura o diálogo de configuração de camadas
-        dialogo_config = ConfigCamadasDialog(
+        dialogo_config = GerenciarRegrasDialog(
             psd_filename=nome_modelo_selecionado,
             camadas_existentes=camadas_atuais, # Passa as camadas atuais para pré-preenchimento
             parent=self
         )
 
         # Conecta o sinal 'configuracaoSalva' do diálogo ao método que processa e salva
-        dialogo_config.configuracaoSalva.connect(
-            lambda novas_camadas: self._processar_camadas_configuradas(nome_modelo_selecionado, novas_camadas)
+        dialogo_config.configuracaoSalva.connect(lambda novos_dados: self._processar_dados_especificos_configurados(nome_modelo_selecionado, novos_dados)
         )
 
         # Exibe o diálogo de forma modal
@@ -938,7 +914,7 @@ class CartaoApp(QMainWindow):
         2. Pede ao utilizador para selecionar um novo ficheiro PSD.
         3. Exclui o modelo antigo (ficheiros e configuração).
         4. Copia o novo ficheiro PSD para a pasta de modelos.
-        5. Abre o ConfigCamadasDialog para o novo ficheiro, pré-preenchido com as camadas sugeridas.
+        5. Abre o GerenciarRegrasDialog para o novo ficheiro, pré-preenchido com as camadas sugeridas.
         6. Processa a configuração salva.
         7. Atualiza a UI.
 
@@ -1003,9 +979,9 @@ class CartaoApp(QMainWindow):
             self.atualizar_modelos_combobox()
             return
 
-        # 5. Abre o ConfigCamadasDialog para o novo ficheiro, com as camadas antigas como sugestão
+        # 5. Abre o GerenciarRegrasDialog para o novo ficheiro, com as camadas antigas como sugestão
         self.log_message(f"A abrir diálogo de configuração de camadas para o novo ficheiro PSD: '{nome_base_novo_psd}'.")
-        dialogo_config_novo = ConfigCamadasDialog(
+        dialogo_config_novo = GerenciarRegrasDialog(
             psd_filename=nome_base_novo_psd,
             camadas_existentes=camadas_sugeridas, # Usa as camadas do modelo antigo como sugestão
             parent=self
@@ -1189,79 +1165,64 @@ class CartaoApp(QMainWindow):
 
     def gerar_cartoes(self):
         """
-        Orquestra a geração dos cartões em lote.
-        1. Valida se um modelo PSD está selecionado e configurado.
-        2. Recolhe os dados da tabela.
-        3. Interage com o Photoshop para abrir o modelo, preencher as camadas
-           com os dados de cada linha da tabela e exportar cada cartão como PNG.
+        Orquestra a geração dos cartões. Versão com a lógica de regras corrigida
+        para priorizar a aplicação da regra sobre o valor literal da tabela.
         """
         self.log_message("A iniciar processo de geração de cartões...")
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)  # Cursor de espera
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
 
-        # --- Validações Iniciais ---
+        # --- Validações Iniciais (sem alterações) ---
         modelo_selecionado_nome = self.modelo_combobox.currentText()
         if not modelo_selecionado_nome or modelo_selecionado_nome == utils.TEXTO_NENHUM_MODELO:
-            self.log_message("ERRO: Nenhum modelo PSD selecionado para geração.")
             QMessageBox.warning(self, "Geração de Cartões", "Por favor, selecione um modelo PSD primeiro.")
             QApplication.restoreOverrideCursor()
             return
 
-        if not self.table_headers:  # table_headers é preenchido por _atualizar_tabela_para_modelo
-            self.log_message(f"ERRO: Modelo '{modelo_selecionado_nome}' não tem camadas configuradas.")
-            QMessageBox.warning(self, "Geração de Cartões",
-                                f"O modelo '{modelo_selecionado_nome}' não possui camadas configuradas.\n"
-                                "Use 'Modificar Modelo' para definir as camadas editáveis.")
+        caminho_psd_modelo = os.path.abspath(os.path.join(PASTA_PADRAO_MODELOS, modelo_selecionado_nome))
+        if not os.path.exists(caminho_psd_modelo):
+            QMessageBox.critical(self, "Erro de Arquivo",
+                                 f"O ficheiro modelo PSD '{modelo_selecionado_nome}' não foi encontrado.")
             QApplication.restoreOverrideCursor()
             return
 
-        caminho_relativo = os.path.join(PASTA_PADRAO_MODELOS, modelo_selecionado_nome)
-        caminho_psd_modelo = os.path.abspath(caminho_relativo)  # <--- A CORREÇÃO
-
-        if not os.path.exists(caminho_psd_modelo):
-            self.log_message(f"ERRO CRÍTICO: Ficheiro modelo PSD '{caminho_psd_modelo}' não encontrado.")
-            QMessageBox.critical(self, "Erro de Ficheiro",
-                                 f"O ficheiro modelo PSD '{modelo_selecionado_nome}' não foi encontrado na pasta de modelos.")
+        config_modelo = self.configuracoes_modelos.get(modelo_selecionado_nome, {})
+        regras_texto = config_modelo.get("regras_texto", {})
+        dados_especificos_configurados = config_modelo.get("dados_especificos", [])
+        if not dados_especificos_configurados:
+            QMessageBox.warning(self, "Geração de Cartões",
+                                f"O modelo '{modelo_selecionado_nome}' não possui Dados Específicos configurados.")
             QApplication.restoreOverrideCursor()
             return
 
         if not self.output_dir or not os.path.exists(self.output_dir):
-            self.log_message("ERRO: Pasta de saída inválida ou não definida.")
-            QMessageBox.warning(self, "Geração de Cartões",
-                                "A pasta de saída não está definida ou não existe.\n"
-                                "Por favor, selecione uma pasta de saída válida.")
-            self.selecionar_pasta_saida()  # Pede ao utilizador para selecionar
-            if not self.output_dir or not os.path.exists(self.output_dir):  # Verifica novamente
+            self.selecionar_pasta_saida()
+            if not self.output_dir or not os.path.exists(self.output_dir):
                 QApplication.restoreOverrideCursor()
-                return  # Aborta se ainda não for válida
+                return
 
-        # --- Recolha de Dados da Tabela ---
+        # --- Recolha de Dados da Tabela (sem alterações) ---
         dados_para_geracao = []
-        total_linhas_tabela = self.data_table.rowCount()
-        num_colunas_esperado = len(self.table_headers)
-
-        for num_linha in range(total_linhas_tabela):
+        for num_linha in range(self.data_table.rowCount()):
             dados_linha_atual = {}
             linha_contem_dados = False
-            for num_coluna, nome_header_camada in enumerate(self.table_headers):
+            for num_coluna, nome_header in enumerate(self.table_headers):
                 item_tabela = self.data_table.item(num_linha, num_coluna)
                 valor_celula = item_tabela.text().strip() if item_tabela else ""
-                dados_linha_atual[nome_header_camada] = valor_celula
+                dados_linha_atual[nome_header] = valor_celula
                 if valor_celula:
                     linha_contem_dados = True
-
             if linha_contem_dados:
                 dados_para_geracao.append(dados_linha_atual)
 
         if not dados_para_geracao:
-            self.log_message("AVISO: Não há dados válidos na tabela para gerar cartões.")
             QMessageBox.information(self, "Geração de Cartões",
-                                    "A tabela está vazia ou não contém dados nas linhas para processar.")
+                                    "A tabela está vazia ou não contém dados para processar.")
             QApplication.restoreOverrideCursor()
             return
 
-        self.log_message(f"Encontrados {len(dados_para_geracao)} cartões para gerar a partir da tabela.")
+        self.log_message(f"Encontrados {len(dados_para_geracao)} cartões para gerar.")
 
-        # --- Interação com Photoshop ---
+        # --- Interação com Photoshop (LÓGICA DE REGRAS CORRIGIDA) ---
         ps_app = None
         doc_modelo = None
         cartoes_gerados_count = 0
@@ -1269,134 +1230,88 @@ class CartaoApp(QMainWindow):
 
         try:
             self.log_message("A tentar conectar-se ao Photoshop...")
-            QApplication.processEvents()  # Permite que a UI atualize
             ps_app = win32com.client.Dispatch("Photoshop.Application")
-            ps_app.Visible = False  # Pode ser True para depuração, False para produção
-            self.log_message("Conectado ao Photoshop com sucesso.")
-
-            # Prepara as opções de exportação (uma vez)
+            ps_app.Visible = False
             opcoes_exportacao = win32com.client.Dispatch("Photoshop.ExportOptionsSaveForWeb")
-            opcoes_exportacao.Format = PS_EXPORT_FORMAT_PNG  # Constante para PNG
-            opcoes_exportacao.PNG8 = False  # Usar PNG-24 para melhor qualidade
-
-            self.log_message(f"A abrir o modelo PSD: {caminho_psd_modelo}")
-            QApplication.processEvents()
+            opcoes_exportacao.Format = 13  # PNG
+            opcoes_exportacao.PNG8 = False
             doc_modelo = ps_app.Open(caminho_psd_modelo)
-            self.log_message("Modelo PSD aberto.")
 
             for i, dados_cartao_atual in enumerate(dados_para_geracao):
-                self.log_message(f"A processar cartão {i + 1} de {len(dados_para_geracao)}...")
+                self.log_message(f"A processar cartão {i + 1}/{len(dados_para_geracao)}...")
                 QApplication.processEvents()
 
-                # Monta o dicionário de campos para o Photoshop
-                campos_para_psd = {}
-                nome_base_ficheiro = "cartao_sem_nome"  # Default
+                campos_finais_para_psd = {}
+                # Copiamos os dados da linha para um dicionário temporário que podemos modificar
+                dados_a_processar = dados_cartao_atual.copy()
 
-                for nome_camada_configurada, valor_da_tabela in dados_cartao_atual.items():
-                    # A chave em dados_cartao_atual é o nome da camada configurada (header da tabela)
-                    # O valor é o texto a ser inserido nessa camada no PSD.
-                    campos_para_psd[nome_camada_configurada] = valor_da_tabela
+                # 1. PROCESSAR AS REGRAS PRIMEIRO
+                if regras_texto:
+                    for camada_alvo, regra in regras_texto.items():
+                        # Encontra todos os placeholders, ex: {nome}, {conjuge}
+                        placeholders = re.findall(r'\{([^{}]+)\}', regra)
 
-                    # Lógica para nome do ficheiro (exemplo: usar o valor da camada "nome")
-                    if nome_camada_configurada.lower() == utils.CAMADA_NOME.lower() and valor_da_tabela:  # utils.CAMADA_NOME = "nome"
-                        nome_base_ficheiro = valor_da_tabela.replace(" ", "_").replace("/", "-")  # Sanitiza um pouco
-                    elif utils.CAMADA_NOME.lower() not in dados_cartao_atual and nome_camada_configurada.lower() == \
-                            self.table_headers[0].lower() and valor_da_tabela:
-                        # Se não houver camada "nome", usa o valor da primeira coluna como nome base
-                        nome_base_ficheiro = valor_da_tabela.replace(" ", "_").replace("/", "-")
+                        rule_has_valid_data = False
+                        if not placeholders:
+                            rule_has_valid_data = True
+                        else:
+                            # Verifica se pelo menos um placeholder pode ser preenchido com dados reais
+                            for placeholder in placeholders:
+                                if placeholder in dados_a_processar and dados_a_processar[placeholder]:
+                                    rule_has_valid_data = True
+                                    break
 
-                # Lógica especial para formatar a data, se uma camada "data" estiver configurada
-                if utils.CAMADA_DATA.lower() in campos_para_psd:  # utils.CAMADA_DATA = "data"
-                    data_bruta = campos_para_psd[utils.CAMADA_DATA.lower()]
-                    if data_bruta:
-                        try:
-                            data_formatada = utils.data_por_extenso(data_bruta)
-                            campos_para_psd[utils.CAMADA_DATA.lower()] = data_formatada
-                            self.log_message(f"Data '{data_bruta}' formatada para '{data_formatada}'.")
-                        except Exception as e_data:
-                            self.log_message(
-                                f"AVISO: Não foi possível formatar a data '{data_bruta}'. Usando valor original. Erro: {e_data}")
-                            # Mantém a data bruta se a formatação falhar
+                        if rule_has_valid_data:
+                            # Se a regra é válida, formata o texto e o define como o valor final para esta camada
+                            texto_final = regra.format_map(defaultdict(str, dados_a_processar))
+                            campos_finais_para_psd[camada_alvo] = texto_final
+                            # Remove o campo do dicionário temporário para não ser adicionado novamente
+                            if camada_alvo in dados_a_processar:
+                                del dados_a_processar[camada_alvo]
+
+                # 2. ADICIONAR OS DADOS RESTANTES (que não tinham regras ou cujas regras eram inválidas)
+                for campo_restante, valor_restante in dados_a_processar.items():
+                    campos_finais_para_psd[campo_restante] = valor_restante
 
                 # Define o nome do ficheiro de saída
-                # Exemplo: "01_01_-_Joao_Silva.png" ou "Joao_Silva_1.png"
-                # Você pode querer uma lógica mais sofisticada aqui.
-                data_para_nome = dados_cartao_atual.get(utils.CAMADA_DATA.lower(), "")
-                if data_para_nome and len(
-                        data_para_nome) >= 5 and '/' in data_para_nome:  # Verifica se é uma data como dd/mm
-                    try:
-                        partes_data = data_para_nome.split('/')
-                        nome_ficheiro_png = f"{partes_data[1].zfill(2)}_{partes_data[0].zfill(2)}_-__{nome_base_ficheiro}.png"
-                    except:
-                        nome_ficheiro_png = f"{nome_base_ficheiro}_{i + 1}.png"
-                else:
-                    nome_ficheiro_png = f"{nome_base_ficheiro}_{i + 1}.png"
+                nome_base_ficheiro = dados_cartao_atual.get("nome", f"cartao_{i + 1}").replace(" ", "_")
+                caminho_saida_completo = os.path.join(self.output_dir, f"{nome_base_ficheiro}.png")
 
-                caminho_saida_completo = os.path.join(self.output_dir, nome_ficheiro_png)
-
-                # Chama a função de ps_utils para fazer a magia no Photoshop
                 try:
                     ps_utils.gerar_cartao_photoshop(
                         psApp=ps_app,
                         doc=doc_modelo,
                         output_path=caminho_saida_completo,
-                        campos=campos_para_psd,
+                        campos=campos_finais_para_psd,
                         export_options_obj=opcoes_exportacao
                     )
                     self.log_message(f"Cartão salvo com sucesso: {caminho_saida_completo}")
                     cartoes_gerados_count += 1
                 except Exception as e_ps_util:
-                    self.log_message(
-                        f"ERRO ao gerar cartão individual para dados: {dados_cartao_atual}. Erro: {e_ps_util}")
+                    self.log_message(f"ERRO ao gerar cartão para dados: {dados_cartao_atual}. Erro: {e_ps_util}")
                     erros_na_geracao += 1
-                    # Opcional: perguntar ao utilizador se deseja continuar após um erro
-                    # resp_erro = QMessageBox.critical(self, "Erro na Geração", f"Erro ao gerar cartão: {e_ps_util}\nDeseja continuar?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-                    # if resp_erro == QMessageBox.StandardButton.No:
-                    #    raise Exception("Geração interrompida pelo utilizador após erro.") # Força a saída do loop
-
-            self.log_message(f"Processamento de todos os {len(dados_para_geracao)} cartões da tabela concluído.")
 
         except Exception as e_geral:
             self.log_message(f"ERRO GERAL durante a geração de cartões: {e_geral}")
-            QMessageBox.critical(self, "Erro na Geração",
-                                 f"Ocorreu um erro inesperado durante a geração dos cartões:\n{e_geral}")
-            erros_na_geracao = len(dados_para_geracao) - cartoes_gerados_count  # Assume que os restantes falharam
+            QMessageBox.critical(self, "Erro na Geração", f"Ocorreu um erro inesperado:\n{e_geral}")
         finally:
             if doc_modelo is not None:
-                try:
-                    doc_modelo.Close(2)  # 2 = psDoNotSaveChanges
-                    self.log_message("Documento modelo PSD fechado no Photoshop.")
-                except Exception as e_close_doc:
-                    self.log_message(f"AVISO: Erro ao tentar fechar o documento modelo: {e_close_doc}")
+                doc_modelo.Close(2)
             if ps_app is not None:
-                try:
-                    # ps_app.Quit() # Descomente se quiser fechar o Photoshop automaticamente
-                    # self.log_message("Comando Quit enviado ao Photoshop.")
-                    pass  # Por agora, deixamos o Photoshop aberto
-                except Exception as e_quit_ps:
-                    self.log_message(f"AVISO: Erro ao tentar enviar comando Quit ao Photoshop: {e_quit_ps}")
+                ps_app = None
+                gc.collect()
 
-            ps_app = None  # Limpa as referências COM
-            doc_modelo = None
-            gc.collect()  # Força a recolha de lixo para ajudar a liberar objetos COM
-
-            QApplication.restoreOverrideCursor()  # Restaura o cursor normal
+            QApplication.restoreOverrideCursor()
             self.log_message("Processo de geração de cartões finalizado.")
 
-            # Mensagem final ao utilizador
             if cartoes_gerados_count > 0:
-                msg_final = f"{cartoes_gerados_count} cartão(ões) gerado(s) com sucesso."
+                mensagem_final = f"{cartoes_gerados_count} cartões gerados com sucesso."
                 if erros_na_geracao > 0:
-                    msg_final += f"\n{erros_na_geracao} cartão(ões) falharam durante a geração."
-                    QMessageBox.warning(self, "Geração Concluída com Erros",
-                                        msg_final + f"\n\nVerifique o log para detalhes e a pasta de saída: {self.output_dir}")
-                else:
-                    QMessageBox.information(self, "Geração Concluída",
-                                            msg_final + f"\n\nOs cartões foram salvos em: {self.output_dir}")
+                    mensagem_final += f"\n\nOcorreram {erros_na_geracao} erros. Verifique o log para mais detalhes."
+                QMessageBox.information(self, "Geração Concluída", mensagem_final)
             elif erros_na_geracao > 0:
-                QMessageBox.critical(self, "Falha na Geração",
-                                     f"Nenhum cartão foi gerado com sucesso. {erros_na_geracao} tentativa(s) falharam.\nVerifique o log para detalhes.")
-            # Se nenhum foi gerado e nenhum erro (caso de tabela vazia já tratado), não mostra nada aqui.
+                QMessageBox.warning(self, "Geração Falhou",
+                                    f"Nenhum cartão foi gerado com sucesso. Ocorreram {erros_na_geracao} erros.")
 
 # ________________________________________________________________________________________________
 
@@ -1692,3 +1607,53 @@ class CartaoApp(QMainWindow):
                 return False  # Todas as tentativas falharam
 
         return False  # Segurança, não deveria ser alcançado se a lógica do loop estiver correta
+
+# ________________________________________________________________________________________________
+
+    # Em app_window.py
+
+    def abrir_dialogo_gerenciar_regras(self):
+        """
+        Abre o diálogo para o usuário criar e editar as Regras de Texto.
+        Esta versão NÃO abre o Photoshop.
+        """
+        modelo_selecionado = self.modelo_combobox.currentText()
+        if not modelo_selecionado or modelo_selecionado == utils.TEXTO_NENHUM_MODELO:
+            QMessageBox.warning(self, "Ação Inválida", "Selecione um modelo para gerenciar suas regras.")
+            return
+
+        config_modelo = self.configuracoes_modelos.get(modelo_selecionado, {})
+        dados_especificos = config_modelo.get("dados_especificos", [])
+        regras_atuais = config_modelo.get("regras_texto", {})
+
+        if not dados_especificos:
+            QMessageBox.information(self, "Dados Não Configurados",
+                                    "Configure primeiro os 'Dados Específicos' do modelo usando o botão 'Modificar'.\n"
+                                    "As regras de texto usam esses dados como variáveis.")
+            return
+
+        self.log_message(f"Abrindo gerenciador de regras para o modelo: {modelo_selecionado}")
+
+        # Chama o diálogo passando os dados da tabela (variáveis) e as regras atuais
+        dialogo = GerenciarRegrasTextoDialog(
+            dados_especificos_disponiveis=dados_especificos,
+            regras_atuais=regras_atuais,
+            parent=self
+        )
+
+        dialogo.regrasSalvas.connect(
+            lambda regras: self._processar_regras_salvas(modelo_selecionado, regras)
+        )
+
+        dialogo.exec()
+
+# ________________________________________________________________________________________________
+
+    def _processar_regras_salvas(self, nome_modelo, novas_regras):
+        """Recebe as regras do diálogo e as salva na configuração."""
+        if nome_modelo in self.configuracoes_modelos:
+            self.configuracoes_modelos[nome_modelo]['regras_texto'] = novas_regras
+            self.log_message(f"Regras de texto para o modelo '{nome_modelo}' atualizadas.")
+            utils.salvar_configuracoes_camadas_modelos(self.configuracoes_modelos)
+        else:
+            self.log_message(f"ERRO: Tentativa de salvar regras para modelo não encontrado: {nome_modelo}")

@@ -27,52 +27,52 @@ def get_path_config_camadas_json():
     """Retorna o caminho completo para o arquivo JSON de configuração das camadas."""
     return os.path.join(get_app_config_dir(), CONFIG_CAMADAS_FILENAME)
 
+
 def carregar_configuracoes_camadas_modelos():
-    """Carrega o dicionário de configurações de camadas do arquivo JSON."""
+    """
+    Carrega o dicionário de configurações do arquivo JSON.
+    Garante retrocompatibilidade, convertendo o formato antigo para o novo se necessário.
+    """
     filepath = get_path_config_camadas_json()
     if not os.path.exists(filepath):
-        return {} # Retorna um dicionário vazio se o arquivo não existe
+        return {}
+
     try:
         with open(filepath, "r", encoding="utf-8") as f:
             data = json.load(f)
-            return data
+
+        # Lógica de migração para retrocompatibilidade
+        for nome_modelo, config in data.items():
+            # Se a configuração for uma lista (formato antigo)...
+            if isinstance(config, list):
+                # ...converte para o novo formato de dicionário.
+                print(f"INFO: Convertendo configuração do modelo '{nome_modelo}' do formato antigo para o novo.")
+                data[nome_modelo] = {
+                    "dados_especificos": config,  # A lista antiga vira os "dados_especificos"
+                    "regras_texto": {}  # Cria um dicionário vazio para as regras
+                }
+
+        return data
+
     except json.JSONDecodeError:
-        print(f"Erro: Arquivo de configuração de camadas corrompido ou mal formatado: {filepath}")
-        return {} # Retorna vazio em caso de erro de leitura/formato
+        print(f"Erro: Arquivo de configuração corrompido ou mal formatado: {filepath}")
+        return {}
     except Exception as e:
         print(f"Erro ao carregar configurações de camadas: {e}")
         return {}
 
 def salvar_configuracoes_camadas_modelos(configuracoes_dict):
-    """Salva o dicionário de configurações de camadas no arquivo JSON."""
+    """Salva o dicionário de configurações dos modelos (Dados Específicos e Regras de Texto) no arquivo JSON."""
     filepath = get_path_config_camadas_json()
     try:
         with open(filepath, "w", encoding="utf-8") as f:
+            # O ensure_ascii=False é importante para salvar caracteres como 'ç' e acentos corretamente.
             json.dump(configuracoes_dict, f, indent=4, ensure_ascii=False)
-        print(f"Configurações de camadas salvas em: {filepath}")
+        print(f"Configurações de modelos salvas em: {filepath}")
         return True
     except Exception as e:
-        print(f"Erro ao salvar configurações de camadas: {e}")
+        print(f"Erro ao salvar configurações de modelos: {e}")
         return False
-
-def data_por_extenso(data_str):
-    """Recebe uma string no formato DD/MM/AAAA ou DD/MM/AA e retorna 'Ponta Grossa, DD de <mês> de AAAA.'"""
-    meses = [
-        "janeiro", "fevereiro", "março", "abril", "maio", "junho",
-        "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"
-    ]
-    try:
-        partes = data_str.strip().split('/')
-        if len(partes) != 3:
-            return ""
-        dia, mes, ano = partes
-        if len(ano) == 2:  # Se vier '25', transforma em '2025'
-            ano = "20" + ano
-        dia = str(int(dia))  # Remove zero à esquerda
-        mes_extenso = meses[int(mes) - 1]
-        return f"Ponta Grossa, {dia} de {mes_extenso} de {ano}."
-    except Exception:
-        return ""
 
 def get_settings_file_path():
         # Caminho para arquivo JSON nos arquivos temporários do sistema
