@@ -1,36 +1,43 @@
-# dialogo_regras_texto.py
+# dialogo_regras_texto.py (Layout do Usuário Adaptado)
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QScrollArea, QWidget, QDialogButtonBox, QMessageBox, QFrame
+    QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+    QTextEdit, QPushButton, QScrollArea, QWidget, QDialogButtonBox
 )
 from PySide6.QtCore import Qt, Signal
-from functools import partial
+import sys  # Necessário para o bloco de teste __main__
+# Bloco corrigido
+from PySide6.QtWidgets import (
+    QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+    QTextEdit, QPushButton, QScrollArea, QWidget, QDialogButtonBox,
+    QSizePolicy  # <-- ESTA É A LINHA QUE FALTAVA
+)
+
 
 class GerenciarRegrasTextoDialog(QDialog):
     regrasSalvas = Signal(dict)
 
-    def __init__(self, dados_especificos_disponiveis, regras_atuais, parent=None):
+    def __init__(self, dados_especificos_disponiveis, regras_atuais, parent=None):  # Parâmetro renomeado
         super().__init__(parent)
         self.setWindowTitle("Gerenciar Regras de Texto")
-        self.setMinimumSize(700, 500)
+        self.setMinimumSize(850, 600)
+        self.dados_especificos = dados_especificos_disponiveis  # Usando o nome consistente
 
-        self.linhas_widgets = []
         main_layout = QVBoxLayout(self)
 
-        # Mostra as variáveis que o usuário pode usar
-        variaveis_formatadas = ", ".join([f"{{{d}}}" for d in dados_especificos_disponiveis])
-        info_label = QLabel(f"<b>Variáveis disponíveis:</b> {variaveis_formatadas}")
+        # Variáveis disponíveis
+        variaveis_formatadas = ", ".join([f"{{{d}}}" for d in self.dados_especificos])
+        info_label = QLabel(f"<b>Variáveis disponíveis para usar nas regras:</b><br>{variaveis_formatadas}")
         info_label.setWordWrap(True)
         main_layout.addWidget(info_label)
 
         # Cabeçalho
         header_layout = QHBoxLayout()
-        header_layout.addWidget(QLabel("<b>Nome da Camada no Photoshop (Alvo)</b>"))
-        header_layout.addWidget(QLabel("<b>Conteúdo da Camada (Regra)</b>"))
-        header_layout.addSpacing(40) # Espaço para o botão de remover
+        header_layout.addWidget(QLabel("<b>Camada Alvo (Dado Específico)</b>"), 1)
+        header_layout.addWidget(QLabel("<b>Conteúdo / Regra de Formatação</b>"), 5)
+        header_layout.addSpacing(35)  # Espaço para o botão de limpar
         main_layout.addLayout(header_layout)
 
-        # Área de Rolagem para as regras
+        # Área de rolagem
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_widget = QWidget()
@@ -39,73 +46,95 @@ class GerenciarRegrasTextoDialog(QDialog):
         scroll_area.setWidget(scroll_widget)
         main_layout.addWidget(scroll_area)
 
-        # Carrega as regras que já existem
-        if regras_atuais:
-            for camada, regra in regras_atuais.items():
-                self.adicionar_linha_regra(camada, regra)
+        self.linhas_widgets = {}  # Armazena referências aos widgets de cada linha
+        # Cria uma linha para cada "Dado Específico"
+        for nome_dado in self.dados_especificos:
+            regra_existente = regras_atuais.get(nome_dado, "")
+            self.adicionar_linha_grid(nome_dado, regra_existente)
 
-        # Botão para adicionar nova regra
-        self.btn_add_regra = QPushButton("+ Adicionar Nova Regra")
-        # Linha corrigida:
-        self.btn_add_regra.clicked.connect(lambda: self.adicionar_linha_regra())
-        main_layout.addWidget(self.btn_add_regra)
-
-        # Botões de Salvar e Cancelar
+        # Botões de ação
         button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         main_layout.addWidget(button_box)
 
-    def adicionar_linha_regra(self, nome_camada="", regra=""):
-        linha_widget = QWidget()
+    def adicionar_linha_grid(self, nome_dado, regra_texto):
+        linha_widget = QWidget()  # Widget container para a linha
         linha_layout = QHBoxLayout(linha_widget)
-        linha_layout.setContentsMargins(0,0,0,0)
+        linha_layout.setContentsMargins(0, 0, 0, 0)  # Sem margens internas
 
-        edit_camada_alvo = QLineEdit(nome_camada)
-        edit_camada_alvo.setPlaceholderText("Ex: Nome Completo")
+        # "Dado Específico" (label estilizado como botão não clicável)
+        label_dado_especifico = QPushButton(nome_dado)
+        label_dado_especifico.setEnabled(False)  # Não clicável
+        label_dado_especifico.setStyleSheet(
+            "color: #FFFFFF; background-color: #33373B; border: 1px solid #4A4F54;"
+            "font-size: 14px; border-radius: 5px; padding: 5px; min-height: 30px;"
+            "text-align: center;"  # Garante que o texto do botão esteja centralizado
+        )
+        # Ajusta a política de tamanho para que o botão não expanda demais
+        label_dado_especifico.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
-        edit_regra_texto = QLineEdit(regra)
-        edit_regra_texto.setPlaceholderText("Ex: {nome} {sobrenome}")
+        # Campo de edição para a regra de texto
+        edit_regra = QTextEdit(regra_texto)
+        edit_regra.setPlaceholderText(f"Digite a regra para {{{nome_dado}}} (ou deixe em branco)")
+        edit_regra.setFixedHeight(70)  # Altura para visualização de múltiplas linhas
 
-        btn_remover = QPushButton("X")
-        btn_remover.setFixedSize(30, 30)
-        btn_remover.setStyleSheet("color: white; background-color: #e63946; border-radius: 5px;")
-        btn_remover.setToolTip("Remover esta regra")
-        btn_remover.clicked.connect(partial(self.remover_linha, linha_widget))
+        # Botão para limpar (excluir) o conteúdo da regra
+        btn_limpar_regra = QPushButton("X")
+        btn_limpar_regra.setFixedSize(28, 28)  # Tamanho fixo para o botão
+        btn_limpar_regra.setStyleSheet(
+            "color: white; background-color: #C94444; border-radius: 5px; font-weight: bold;"
+        )
+        btn_limpar_regra.setToolTip(f"Limpar a regra para '{nome_dado}'")
+        # Conecta o clique do botão para limpar o QTextEdit correspondente
+        btn_limpar_regra.clicked.connect(lambda: edit_regra.setPlainText(""))
 
-        linha_layout.addWidget(edit_camada_alvo)
-        linha_layout.addWidget(edit_regra_texto)
-        linha_layout.addWidget(btn_remover)
+        # Adiciona os widgets ao layout da linha com proporções
+        linha_layout.addWidget(label_dado_especifico, 2)  # Proporção 2 para o label
+        linha_layout.addWidget(edit_regra, 5)  # Proporção 5 para o campo de texto
+        linha_layout.addWidget(btn_limpar_regra)  # Botão de limpar ocupa espaço natural
 
+        # Adiciona a linha completa ao layout principal de regras
         self.regras_layout.addWidget(linha_widget)
-        self.linhas_widgets.append({
-            'widget': linha_widget,
-            'alvo': edit_camada_alvo,
-            'regra': edit_regra_texto
-        })
-
-    def remover_linha(self, linha_widget):
-        # Encontra o item para remover da lista de controle
-        item_para_remover = next((item for item in self.linhas_widgets if item['widget'] == linha_widget), None)
-        if item_para_remover:
-            self.linhas_widgets.remove(item_para_remover)
-
-        # Remove o widget do layout e o deleta
-        linha_widget.deleteLater()
+        # Guarda a referência ao QTextEdit para fácil acesso ao salvar
+        self.linhas_widgets[nome_dado] = {'widget': linha_widget, 'edit': edit_regra}
 
     def accept(self):
         novas_regras = {}
-        nomes_alvo = []
-        for linha in self.linhas_widgets:
-            alvo = linha['alvo'].text().strip()
-            regra = linha['regra'].text().strip()
-
-            if alvo and regra: # Apenas salva se ambos os campos estiverem preenchidos
-                if alvo in nomes_alvo:
-                    QMessageBox.warning(self, "Alvo Duplicado", f"A camada alvo '{alvo}' foi definida mais de uma vez. Use nomes de camada únicos.")
-                    return
-                novas_regras[alvo] = regra
-                nomes_alvo.append(alvo)
+        # Itera sobre os "Dados Específicos" para os quais criamos linhas
+        for nome_dado, refs in self.linhas_widgets.items():
+            texto_regra = refs['edit'].toPlainText().strip()
+            if texto_regra:  # Salva a regra apenas se ela não estiver vazia
+                novas_regras[nome_dado] = texto_regra
 
         self.regrasSalvas.emit(novas_regras)
         super().accept()
+
+
+# ====== BLOCO DE TESTE (MANTIDO DO SEU EXEMPLO) ======
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+
+    # Simula os dados que seriam passados pelo app_window.py
+    dados_para_teste = ["Nome", "Conjuge", "Data", "Endereço", "País", "Loja", "Carro"]
+    regras_iniciais_teste = {
+        "Nome": "Sr(a). {Nome}",
+        "Conjuge": "Casado(a) com {Conjuge} em {Data}",
+        "Data": ""  # Exemplo de regra vazia que não será salva
+    }
+
+    dlg = GerenciarRegrasTextoDialog(dados_para_teste, regras_iniciais_teste)
+
+    # Para ver o que seria salvo:
+    # def mostrar_regras_salvas(regras):
+    # print("Regras a serem salvas:", regras)
+    # dlg.regrasSalvas.connect(mostrar_regras_salvas)
+
+    if dlg.exec():
+        print("Diálogo fechado com 'Salvar'.")
+        # O sinal 'regrasSalvas' já teria sido emitido e processado
+        # pela função conectada em um app real.
+    else:
+        print("Diálogo fechado com 'Cancelar' ou 'X'.")
+
+    sys.exit(app.exec())
