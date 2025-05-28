@@ -8,9 +8,9 @@ from functools import partial
 
 
 class GerenciarRegrasDialog(QDialog):
-    configuracaoSalva = Signal(list)
+    configuracaoSalva = Signal(list, str)
 
-    def __init__(self, psd_filename, camadas_existentes=None, parent=None):
+    def __init__(self, psd_filename, camadas_existentes=None, regra_nome_arquivo_existente="", parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"Configurar Dados para: {psd_filename}")
         self.setFixedSize(500, 350)
@@ -24,6 +24,23 @@ class GerenciarRegrasDialog(QDialog):
             "Adicione os 'Dados Específicos' que virarão as colunas da tabela.\n"
             "Inclua nomes de camadas do Photoshop e também 'dados virtuais' (ex: nome da mãe).")
         main_layout.addWidget(instruction_label)
+        # Rótulo descritivo para o novo campo
+        label_regra_nome_arquivo = QLabel(
+            "Padrão de Nomenclatura de Arquivo (opcional):"
+        )
+        label_regra_nome_arquivo.setToolTip(
+            "Defina como o nome do arquivo será gerado usando os Dados Específicos como placeholders.\n"
+            "Exemplo: {data}_{nome}"
+        )
+        main_layout.addWidget(label_regra_nome_arquivo)
+
+        # Campo de texto para o usuário digitar a regra
+        self.edit_regra_nome_arquivo = QLineEdit()
+        self.edit_regra_nome_arquivo.setPlaceholderText(
+            "Ex: {data}_{nome} (se vazio, usa o nome do modelo)"
+        )
+        main_layout.addWidget(self.edit_regra_nome_arquivo)
+        self.edit_regra_nome_arquivo.setText(regra_nome_arquivo_existente)
 
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -201,5 +218,10 @@ class GerenciarRegrasDialog(QDialog):
             if reply == QMessageBox.StandardButton.No:
                 return
 
-        self.configuracaoSalva.emit(nomes_camadas)
+        # --- NOVA LÓGICA ---
+        # Pega o texto da regra de nome de arquivo, removendo espaços em branco
+        regra_nome_arquivo = self.edit_regra_nome_arquivo.text().strip()
+
+        # Emite o sinal com os DOIS dados: a lista de camadas e a string da regra
+        self.configuracaoSalva.emit(nomes_camadas, regra_nome_arquivo)
         super().accept()

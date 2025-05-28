@@ -542,31 +542,26 @@ class CartaoApp(QMainWindow):
 
 # ________________________________________________________________________________________________
 
-    # Este método deve estar dentro da classe CartaoApp
-    def _processar_dados_especificos_configurados(self, nome_arquivo_psd: str, lista_dados_configurados: list[str]):
+    def _processar_dados_especificos_configurados(self, nome_arquivo_psd: str, lista_dados_configurados: list[str], regra_nome_arquivo: str):
         """
-        Recebe a lista de 'Dados Específicos' configurados para um modelo,
+        Recebe a lista de 'Dados Específicos' e a regra de nome de arquivo,
         atualiza a configuração do modelo e salva o arquivo JSON.
         Preserva as 'Regras de Texto' existentes.
         """
-        self.log_message(f"Processando 'Dados Específicos' para '{nome_arquivo_psd}': {lista_dados_configurados}")
+        self.log_message(f"Processando configuração para '{nome_arquivo_psd}'...")
+        self.log_message(f"  - Dados Específicos: {lista_dados_configurados}")
+        self.log_message(f"  - Regra de Nome de Arquivo: '{regra_nome_arquivo}'")
 
         if not nome_arquivo_psd:
-            self.log_message("ERRO: Tentativa de processar 'Dados Específicos' para um nome de arquivo PSD vazio.")
+            self.log_message("ERRO: Tentativa de processar configuração para um nome de arquivo PSD vazio.")
             return
 
         # Pega a configuração atual do modelo. Se não existir, começa com um dicionário vazio.
         config_atual = self.configuracoes_modelos.get(nome_arquivo_psd, {})
 
-        if not lista_dados_configurados:
-            # Se o usuário não definiu nenhum dado, limpamos apenas os dados específicos,
-            # mas mantemos as regras, caso ele queira reconfigurar depois.
-            config_atual["dados_especificos"] = []
-            self.log_message(f"'Dados Específicos' limpos para '{nome_arquivo_psd}'.")
-        else:
-            # Atualiza apenas a chave 'dados_especificos' na configuração do modelo
-            config_atual["dados_especificos"] = lista_dados_configurados
-            self.log_message(f"'Dados Específicos' para '{nome_arquivo_psd}' atualizados.")
+        # Atualiza as chaves com os novos dados recebidos
+        config_atual["dados_especificos"] = lista_dados_configurados
+        config_atual["regra_nome_arquivo"] = regra_nome_arquivo
 
         # Garante que a chave 'regras_texto' exista, caso seja um modelo novo.
         if "regras_texto" not in config_atual:
@@ -649,7 +644,10 @@ class CartaoApp(QMainWindow):
         # Conecta o sinal do diálogo ao nosso método que processa e salva as camadas
         # Usamos uma lambda para passar o nome_base_arquivo corretamente.
         # A conexão é feita aqui, e não globalmente, pois é específica para esta instância do diálogo.
-        dialogo_config.configuracaoSalva.connect(lambda lista_dados_salvos: self._processar_dados_especificos_configurados(nome_base_arquivo, lista_dados_salvos)
+        dialogo_config.configuracaoSalva.connect(
+            lambda lista_dados, regra_nome: self._processar_dados_especificos_configurados(
+                nome_base_arquivo, lista_dados, regra_nome
+            )
         )
 
         # Executa o diálogo de configuração. O diálogo é modal.
@@ -864,44 +862,37 @@ class CartaoApp(QMainWindow):
 
     def _handle_alterar_apenas_camadas(self, nome_modelo_selecionado: str):
         """
-        Lida com a Opção A do 'modificar_modelo':
-        Altera apenas a configuração de camadas de um modelo PSD existente.
-        Nenhuma operação de ficheiro é realizada no ficheiro PSD em si.
-
-        Args:
-            nome_modelo_selecionado: O nome do ficheiro do modelo PSD a ser modificado.
+        Lida com a alteração apenas da configuração de um modelo existente.
         """
-        self.log_message(f"A iniciar modificação APENAS DAS CAMADAS para o modelo: '{nome_modelo_selecionado}'.")
+        self.log_message(f"A iniciar modificação de configuração para o modelo: '{nome_modelo_selecionado}'.")
 
-        # Obtém as camadas atualmente configuradas para este modelo como sugestão inicial
-        # Se o modelo não tiver configuração, camadas_atuais será uma lista vazia.
-        camadas_atuais = self.configuracoes_modelos.get(nome_modelo_selecionado, [])
-        self.log_message(f"Camadas atuais para '{nome_modelo_selecionado}' (antes da edição): {camadas_atuais}")
+        # Busca a configuração completa do modelo, incluindo a regra de nome de arquivo
+        config_modelo = self.configuracoes_modelos.get(nome_modelo_selecionado, {})
+        dados_especificos_atuais = config_modelo.get("dados_especificos", [])
+        regra_nome_arquivo_atual = config_modelo.get("regra_nome_arquivo", "")  # Pega a regra
 
-        # Cria e configura o diálogo de configuração de camadas
+        self.log_message(f"Dados Específicos atuais: {dados_especificos_atuais}")
+        self.log_message(f"Regra de Nome de Arquivo atual: '{regra_nome_arquivo_atual}'")
+
+        # Cria o diálogo passando TODOS os dados existentes
         dialogo_config = GerenciarRegrasDialog(
             psd_filename=nome_modelo_selecionado,
-            camadas_existentes=camadas_atuais, # Passa as camadas atuais para pré-preenchimento
+            camadas_existentes=dados_especificos_atuais,
+            regra_nome_arquivo_existente=regra_nome_arquivo_atual,  # Passa a regra para o diálogo
             parent=self
         )
 
-        # Conecta o sinal 'configuracaoSalva' do diálogo ao método que processa e salva
-        dialogo_config.configuracaoSalva.connect(lambda novos_dados: self._processar_dados_especificos_configurados(nome_modelo_selecionado, novos_dados)
+        # Conecta o sinal para receber os DOIS argumentos (lista e string)
+        dialogo_config.configuracaoSalva.connect(
+            lambda novos_dados, nova_regra: self._processar_dados_especificos_configurados(
+                nome_modelo_selecionado, novos_dados, nova_regra
+            )
         )
 
-        # Exibe o diálogo de forma modal
         if dialogo_config.exec():
-            # Utilizador clicou em "Salvar" no diálogo.
-            # O método _processar_camadas_configuradas já foi chamado através do sinal.
-            # _processar_camadas_configuradas, por sua vez, já chama _quando_modelo_mudar
-            # se o modelo modificado for o atualmente selecionado, o que atualiza a tabela.
-            self.log_message(f"Configuração de camadas para '{nome_modelo_selecionado}' foi salva pelo utilizador.")
-            # Não é necessário chamar _quando_modelo_mudar aqui diretamente, pois
-            # _processar_camadas_configuradas já faz isso se o modelo atual for o modificado.
+            self.log_message(f"Configuração para '{nome_modelo_selecionado}' foi salva pelo utilizador.")
         else:
-            # Utilizador clicou em "Cancelar" ou fechou o diálogo.
-            self.log_message(f"Modificação de camadas para '{nome_modelo_selecionado}' cancelada pelo utilizador no diálogo.")
-            # Nenhuma alteração foi feita, então não há necessidade de atualizar a UI além do que já está.
+            self.log_message(f"Modificação de configuração para '{nome_modelo_selecionado}' cancelada.")
 
 # ________________________________________________________________________________________________
 
@@ -987,7 +978,9 @@ class CartaoApp(QMainWindow):
             parent=self
         )
         dialogo_config_novo.configuracaoSalva.connect(
-            lambda novas_camadas: self._processar_camadas_configuradas(nome_base_novo_psd, novas_camadas)
+            lambda novos_dados, nova_regra: self._processar_dados_especificos_configurados(
+                nome_base_novo_psd, novos_dados, nova_regra
+            )
         )
 
         # 6. Processa o resultado do diálogo
@@ -1312,6 +1305,17 @@ class CartaoApp(QMainWindow):
             elif erros_na_geracao > 0:
                 QMessageBox.warning(self, "Geração Falhou",
                                     f"Nenhum cartão foi gerado com sucesso. Ocorreram {erros_na_geracao} erros.")
+
+# ________________________________________________________________________________________________
+
+    def _sanitizar_nome_arquivo(self, nome: str) -> str:
+        """Remove caracteres inválidos para nomes de arquivo."""
+        # Remove caracteres inválidos no Windows e outros sistemas
+        caracteres_invalidos = r'[\\/:"*?<>|]'
+        nome_limpo = re.sub(caracteres_invalidos, '', nome)
+        # Substitui múltiplos espaços por um único underscore
+        nome_limpo = re.sub(r'\s+', '_', nome_limpo)
+        return nome_limpo
 
 # ________________________________________________________________________________________________
 

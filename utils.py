@@ -1,4 +1,5 @@
 import os
+import re
 import tempfile
 import json
 from PySide6.QtGui import QPalette, QColor
@@ -130,3 +131,35 @@ def set_dark_theme(app):
         "QHeaderView::section { background-color: #3E3E3E; color: white; padding: 4px; border: 1px solid #555; }"
         "QTableWidget::item:selected { background-color: #0078D7; color: white; }"
     )
+
+#__________________________________________________________________________________________
+
+def obter_caminho_unico(caminho_proposto: str) -> str:
+    """
+    Verifica se um caminho de arquivo já existe. Se sim, adiciona um sufixo
+    numérico (ex: '-2', '-3') até encontrar um caminho que não exista.
+    """
+    # Se o caminho original não existe, retorna ele imediatamente.
+    if not os.path.exists(caminho_proposto):
+        return caminho_proposto
+
+    # Separa o caminho em diretório, nome base e extensão.
+    # Ex: 'C:/saida/arquivo.png' -> 'C:/saida', 'arquivo', '.png'
+    diretorio, nome_completo = os.path.split(caminho_proposto)
+    nome_base, extensao = os.path.splitext(nome_completo)
+
+    contador = 2
+    while True:
+        # Cria um novo nome de arquivo com o contador.
+        # Ex: 'arquivo-2.png'
+        novo_nome = f"{nome_base}-{contador}{extensao}"
+
+        # Combina com o diretório para ter o caminho completo.
+        novo_caminho = os.path.join(diretorio, novo_nome)
+
+        # Se o novo caminho NÃO existe, encontramos um nome único.
+        if not os.path.exists(novo_caminho):
+            return novo_caminho # Retorna o caminho livre.
+
+        # Se o caminho já existe, incrementa o contador e tenta de novo.
+        contador += 1
