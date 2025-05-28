@@ -24,6 +24,23 @@ class GerenciarRegrasDialog(QDialog):
             "Adicione os 'Dados Específicos' que virarão as colunas da tabela.\n"
             "Inclua nomes de camadas do Photoshop e também 'dados virtuais' (ex: nome da mãe).")
         main_layout.addWidget(instruction_label)
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area_widget_contents = QWidget()
+        self.layout_camadas = QVBoxLayout(self.scroll_area_widget_contents)
+        self.layout_camadas.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.scroll_area.setWidget(self.scroll_area_widget_contents)
+        main_layout.addWidget(self.scroll_area)
+
+        self.btn_add_camada = QPushButton("+ Adicionar Dado Específico")  # Nome do botão atualizado
+        self.btn_add_camada.clicked.connect(self.adicionar_linha_camada_vazia)
+        main_layout.addWidget(self.btn_add_camada)
+
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
+
         # Rótulo descritivo para o novo campo
         label_regra_nome_arquivo = QLabel(
             "Padrão de Nomenclatura de Arquivo (opcional):"
@@ -42,21 +59,6 @@ class GerenciarRegrasDialog(QDialog):
         main_layout.addWidget(self.edit_regra_nome_arquivo)
         self.edit_regra_nome_arquivo.setText(regra_nome_arquivo_existente)
 
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area_widget_contents = QWidget()
-        self.layout_camadas = QVBoxLayout(self.scroll_area_widget_contents)
-        self.layout_camadas.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.scroll_area.setWidget(self.scroll_area_widget_contents)
-        main_layout.addWidget(self.scroll_area)
-
-        self.btn_add_camada = QPushButton("+ Adicionar Dado Específico")  # Nome do botão atualizado
-        self.btn_add_camada.clicked.connect(self.adicionar_linha_camada_vazia)
-        main_layout.addWidget(self.btn_add_camada)
-
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setFrameShadow(QFrame.Shadow.Sunken)
         main_layout.addWidget(line)
 
         self.button_box = QDialogButtonBox(

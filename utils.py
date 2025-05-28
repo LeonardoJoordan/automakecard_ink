@@ -163,3 +163,44 @@ def obter_caminho_unico(caminho_proposto: str) -> str:
 
         # Se o caminho já existe, incrementa o contador e tenta de novo.
         contador += 1
+
+#_________________________________________________________________________
+
+def formatar_data_para_nome_arquivo(texto_data: str) -> str:
+    """
+    Converte uma string de data no formato 'DD de mês' para 'MM.DD'.
+    Ex: '22 de abril' -> '04.22'.
+    A busca pelo mês é case-insensitive.
+    Retorna o texto original se a conversão falhar.
+    """
+    if not isinstance(texto_data, str) or not texto_data.strip():
+        return texto_data
+
+    # Dicionário de meses (chaves em minúsculo para busca case-insensitive)
+    meses = {
+        "janeiro": "01", "fevereiro": "02", "março": "03", "abril": "04",
+        "maio": "05", "junho": "06", "julho": "07", "agosto": "08",
+        "setembro": "09", "outubro": "10", "novembro": "11", "dezembro": "12"
+    }
+
+    texto_lower = texto_data.lower()
+    dia_encontrado = None
+    mes_encontrado = None
+
+    # 1. Encontrar o dia (o primeiro número na string)
+    match_dia = re.search(r'\d+', texto_lower)
+    if match_dia:
+        # zfill(2) garante que o dia tenha 2 dígitos (ex: '7' vira '07')
+        dia_encontrado = match_dia.group(0).zfill(2)
+
+    # 2. Encontrar o mês
+    for nome_mes, num_mes in meses.items():
+        if nome_mes in texto_lower:
+            mes_encontrado = num_mes
+            break
+
+    # 3. Se ambos foram encontrados, retorna o formato novo. Senão, o original.
+    if dia_encontrado and mes_encontrado:
+        return f"{mes_encontrado}.{dia_encontrado}"
+    else:
+        return texto_data

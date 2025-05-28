@@ -1158,8 +1158,8 @@ class CartaoApp(QMainWindow):
 
     def gerar_cartoes(self):
         """
-        Orquestra a geração dos cartões. Versão com a lógica de regras corrigida
-        para priorizar a aplicação da regra sobre o valor literal da tabela.
+        Orquestra a geração dos cartões com a nova lógica de nomenclatura,
+        formatação de data e verificação de duplicatas.
         """
         self.log_message("A iniciar processo de geração de cartões...")
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
@@ -1178,9 +1178,12 @@ class CartaoApp(QMainWindow):
             QApplication.restoreOverrideCursor()
             return
 
+        # --- Carregamento da Configuração do Modelo ---
         config_modelo = self.configuracoes_modelos.get(modelo_selecionado_nome, {})
         regras_texto = config_modelo.get("regras_texto", {})
+        regra_nome_arquivo = config_modelo.get("regra_nome_arquivo", "").strip()
         dados_especificos_configurados = config_modelo.get("dados_especificos", [])
+
         if not dados_especificos_configurados:
             QMessageBox.warning(self, "Geração de Cartões",
                                 f"O modelo '{modelo_selecionado_nome}' não possui Dados Específicos configurados.")
@@ -1193,7 +1196,7 @@ class CartaoApp(QMainWindow):
                 QApplication.restoreOverrideCursor()
                 return
 
-        # --- Recolha de Dados da Tabela (sem alterações) ---
+        # --- Recolha de Dados da Tabela ---
         dados_para_geracao = []
         for num_linha in range(self.data_table.rowCount()):
             dados_linha_atual = {}
@@ -1215,70 +1218,74 @@ class CartaoApp(QMainWindow):
 
         self.log_message(f"Encontrados {len(dados_para_geracao)} cartões para gerar.")
 
-        # --- Interação com Photoshop (LÓGICA DE REGRAS CORRIGIDA) ---
+        # --- Interação com Photoshop e Geração de Arquivos ---
         ps_app = None
         doc_modelo = None
         cartoes_gerados_count = 0
         erros_na_geracao = 0
 
         try:
-            self.log_message("A tentar conectar-se ao Photoshop...")
+            self.log_message("A conectar-se ao Photoshop...")
             ps_app = win32com.client.Dispatch("Photoshop.Application")
             ps_app.Visible = False
             opcoes_exportacao = win32com.client.Dispatch("Photoshop.ExportOptionsSaveForWeb")
             opcoes_exportacao.Format = 13  # PNG
             opcoes_exportacao.PNG8 = False
             doc_modelo = ps_app.Open(caminho_psd_modelo)
+            nome_base_modelo = os.path.splitext(modelo_selecionado_nome)[0]
 
             for i, dados_cartao_atual in enumerate(dados_para_geracao):
                 self.log_message(f"A processar cartão {i + 1}/{len(dados_para_geracao)}...")
                 QApplication.processEvents()
 
-                campos_finais_para_psd = {}
-                # Copiamos os dados da linha para um dicionário temporário que podemos modificar
-                dados_a_processar = dados_cartao_atual.copy()
+                # --- NOVA LÓGICA DE GERAÇÃO DE NOME DE ARQUIVO ---
+                nome_final_arquivo = ""
+                if regra_nome_arquivo:
+                    # Regra personalizada existe
+                    dados_processados = dados_cartao_atual.copy()
+                    # Verifica se há um campo de data para formatar
+                    for chave, valor in dados_processados.items():
+                        if chave.lower() in ['data', 'date']:
+                            dados_processados[chave] = utils.formatar_data_para_nome_arquivo(valor)
 
-                # 1. PROCESSAR AS REGRAS PRIMEIRO
+                    # Gera o nome com a regra e anexa o nome do modelo
+                    nome_com_regra = regra_nome_arquivo.format_map(defaultdict(str, dados_processados))
+                    nome_final_arquivo = f"{nome_com_regra}{nome_base_modelo}"
+                else:
+                    # Fallback: usa o nome do modelo
+                    nome_final_arquivo = nome_base_modelo
+
+                # Sanitiza e obtém caminho único
+                nome_sanitizado = self._sanitizar_nome_arquivo(nome_final_arquivo)
+                if not nome_sanitizado: nome_sanitizado = f"cartao_sem_nome_{i + 1}"  # Garante que não seja vazio
+
+                caminho_proposto = os.path.join(self.output_dir, f"{nome_sanitizado}.png")
+                caminho_saida_completo = utils.obter_caminho_unico(caminho_proposto)
+                # --- FIM DA NOVA LÓGICA ---
+
+                # Lógica de regras de texto (sem alteração)
+                campos_finais_para_psd = {}
+                dados_a_processar = dados_cartao_atual.copy()
                 if regras_texto:
                     for camada_alvo, regra in regras_texto.items():
-                        # Encontra todos os placeholders, ex: {nome}, {conjuge}
                         placeholders = re.findall(r'\{([^{}]+)\}', regra)
-
-                        rule_has_valid_data = False
-                        if not placeholders:
-                            rule_has_valid_data = True
-                        else:
-                            # Verifica se pelo menos um placeholder pode ser preenchido com dados reais
-                            for placeholder in placeholders:
-                                if placeholder in dados_a_processar and dados_a_processar[placeholder]:
-                                    rule_has_valid_data = True
-                                    break
-
+                        rule_has_valid_data = not placeholders or any(
+                            ph in dados_a_processar and dados_a_processar[ph] for ph in placeholders)
                         if rule_has_valid_data:
-                            # Se a regra é válida, formata o texto e o define como o valor final para esta camada
                             texto_final = regra.format_map(defaultdict(str, dados_a_processar))
                             campos_finais_para_psd[camada_alvo] = texto_final
-                            # Remove o campo do dicionário temporário para não ser adicionado novamente
                             if camada_alvo in dados_a_processar:
                                 del dados_a_processar[camada_alvo]
-
-                # 2. ADICIONAR OS DADOS RESTANTES (que não tinham regras ou cujas regras eram inválidas)
                 for campo_restante, valor_restante in dados_a_processar.items():
                     campos_finais_para_psd[campo_restante] = valor_restante
 
-                # Define o nome do ficheiro de saída
-                nome_base_ficheiro = dados_cartao_atual.get("nome", f"cartao_{i + 1}").replace(" ", "_")
-                caminho_saida_completo = os.path.join(self.output_dir, f"{nome_base_ficheiro}.png")
-
+                # Geração do cartão com o novo caminho
                 try:
                     ps_utils.gerar_cartao_photoshop(
-                        psApp=ps_app,
-                        doc=doc_modelo,
-                        output_path=caminho_saida_completo,
-                        campos=campos_finais_para_psd,
-                        export_options_obj=opcoes_exportacao
+                        psApp=ps_app, doc=doc_modelo, output_path=caminho_saida_completo,
+                        campos=campos_finais_para_psd, export_options_obj=opcoes_exportacao
                     )
-                    self.log_message(f"Cartão salvo com sucesso: {caminho_saida_completo}")
+                    self.log_message(f"Cartão salvo com sucesso: {os.path.basename(caminho_saida_completo)}")
                     cartoes_gerados_count += 1
                 except Exception as e_ps_util:
                     self.log_message(f"ERRO ao gerar cartão para dados: {dados_cartao_atual}. Erro: {e_ps_util}")
@@ -1293,15 +1300,13 @@ class CartaoApp(QMainWindow):
             if ps_app is not None:
                 ps_app = None
                 gc.collect()
-
             QApplication.restoreOverrideCursor()
             self.log_message("Processo de geração de cartões finalizado.")
-
+            # Mensagem final (sem alteração)
             if cartoes_gerados_count > 0:
-                mensagem_final = f"{cartoes_gerados_count} cartões gerados com sucesso."
-                if erros_na_geracao > 0:
-                    mensagem_final += f"\n\nOcorreram {erros_na_geracao} erros. Verifique o log para mais detalhes."
-                QMessageBox.information(self, "Geração Concluída", mensagem_final)
+                msg = f"{cartoes_gerados_count} cartões gerados com sucesso."
+                if erros_na_geracao > 0: msg += f"\n\nOcorreram {erros_na_geracao} erros."
+                QMessageBox.information(self, "Geração Concluída", msg)
             elif erros_na_geracao > 0:
                 QMessageBox.warning(self, "Geração Falhou",
                                     f"Nenhum cartão foi gerado com sucesso. Ocorreram {erros_na_geracao} erros.")
